@@ -4,6 +4,8 @@ This is a fork of [Xenia Canary](https://github.com/xenia-canary/xenia-canary) w
 
 Current online sessions are displayed at [https://xenia-netplay-2a0298c0e3f4.herokuapp.com/](https://xenia-netplay-2a0298c0e3f4.herokuapp.com/).
 
+This is a WIP branch that is experimental, forking or downloading this code is not recommended.
+
 ---
 
 ## Netplay Wiki

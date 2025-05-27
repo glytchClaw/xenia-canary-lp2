@@ -84,17 +84,6 @@ void CrashDump() {
   --in_crash_dump;
 }
 
-xe::memory::PageAccess ToPageAccess(uint32_t protect) {
-  if ((protect & kMemoryProtectRead) && !(protect & kMemoryProtectWrite)) {
-    return xe::memory::PageAccess::kReadOnly;
-  } else if ((protect & kMemoryProtectRead) &&
-             (protect & kMemoryProtectWrite)) {
-    return xe::memory::PageAccess::kReadWrite;
-  } else {
-    return xe::memory::PageAccess::kNoAccess;
-  }
-}
-
 Memory::Memory() {
   system_page_size_ = uint32_t(xe::memory::page_size());
   system_allocation_granularity_ =
@@ -207,17 +196,6 @@ bool Memory::Initialize() {
       kMemoryAllocationReserve | kMemoryAllocationCommit,
       kMemoryProtectRead | kMemoryProtectWrite);
 
-  // TODO(Gliniak): Seems like GPU has access to whole physical memory range
-  // without any restriction. This however needs some form of validation.
-  // That's why we're commiting whole physical memory range and deal with
-  // allocations issues on custom page protection level.
-  for (size_t i = 1; i <= 16; i++) {
-    xe::memory::AllocFixed(heaps_.physical.TranslateRelative(i << 24),
-                           heaps_.physical.page_size() * 0x10000,
-                           xe::memory::AllocationType::kCommit,
-                           xe::memory::PageAccess::kReadWrite);
-  }
-
   // Add handlers for MMIO.
   mmio_handler_ = cpu::MMIOHandler::Install(
       virtual_membase_, physical_membase_, physical_membase_ + 0x1FFFFFFF,
@@ -233,17 +211,6 @@ bool Memory::Initialize() {
   uint32_t unk_phys_alloc;
   heaps_.vA0000000.Alloc(0x340000, 64 * 1024, kMemoryAllocationReserve,
                          kMemoryProtectNoAccess, true, &unk_phys_alloc);
-
-  uint32_t unknown_xex_range;  // Probably hypervisor?
-  heaps_.v80000000.Alloc(0x40000, 4 * 1024, kMemoryAllocationCommit,
-                         kMemoryProtectRead | kMemoryProtectWrite, false,
-                         &unknown_xex_range);
-
-  // Value taken from 544307D5. Title explicitly access this address and this is
-  // a value underneath it (It's constant between multiple runs)
-  uint32_t value_to_write = xe::byte_swap(0x2a6e3f38);
-  memcpy(TranslateVirtual(0x80000000 + 0x1C), &value_to_write,
-         sizeof(uint32_t));
 
   return true;
 }
@@ -658,10 +625,8 @@ void Memory::DumpMap() {
   XELOGE("               System Page Size: {0} ({0:08X})", system_page_size_);
   XELOGE("  System Allocation Granularity: {0} ({0:08X})",
          system_allocation_granularity_);
-  XELOGE("                Virtual Membase: {}",
-         static_cast<void*>(virtual_membase_));
-  XELOGE("               Physical Membase: {}",
-         static_cast<void*>(physical_membase_));
+  XELOGE("                Virtual Membase: {}", virtual_membase_);
+  XELOGE("               Physical Membase: {}", physical_membase_);
   XELOGE("");
   XELOGE("------------------------------------------------------------------");
   XELOGE("Virtual Heaps");
@@ -703,6 +668,17 @@ bool Memory::Restore(ByteStream* stream) {
   heaps_.physical.Restore(stream);
 
   return true;
+}
+
+xe::memory::PageAccess ToPageAccess(uint32_t protect) {
+  if ((protect & kMemoryProtectRead) && !(protect & kMemoryProtectWrite)) {
+    return xe::memory::PageAccess::kReadOnly;
+  } else if ((protect & kMemoryProtectRead) &&
+             (protect & kMemoryProtectWrite)) {
+    return xe::memory::PageAccess::kReadWrite;
+  } else {
+    return xe::memory::PageAccess::kNoAccess;
+  }
 }
 
 uint32_t FromPageAccess(xe::memory::PageAccess protect) {
@@ -1935,7 +1911,7 @@ bool PhysicalHeap::TriggerCallbacks(
         std::max(unwatch_last, physical_address_start + physical_length - 1);
     // Don't unprotect too much if not caring much about the region (limit to
     // 4 MB - somewhat random, but max 1024 iterations of the page loop).
-    constexpr uint32_t kMaxUnwatchExcess = 4 * 1024 * 1024;
+    const uint32_t kMaxUnwatchExcess = 4 * 1024 * 1024;
     unwatch_first = std::max(unwatch_first,
                              physical_address_start & ~(kMaxUnwatchExcess - 1));
     unwatch_last =
